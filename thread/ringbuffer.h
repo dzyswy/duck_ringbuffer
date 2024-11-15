@@ -60,17 +60,7 @@ protected:
 
 };
 
-class Frame
-{
-public:
-    Frame(int width, int height, int nbyte) {
-        data_ = std::allocate_shared<char[]>(width * height * nbyte);
-    }
-
-protected:
-    std::shared_ptr<char[]> data_;
-};
-
+ 
 
 
 

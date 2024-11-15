@@ -1,12 +1,16 @@
 #pragma once
 
+#include <string>
 #include <iostream>
+#include <sstream>
+#include <fstream>
 #include <mutex>
 #include <condition_variable>
 #include <thread>
 
 #include "thread/thread.h" 
 #include "thread/queue.h"
+#include "thread/ringbuffer.h"
 
 namespace duck {
 namespace thread {
@@ -97,93 +101,126 @@ protected:
     bool quit_;
 };
 
-
-
-class PipeDemuxNode : public PipeNode
+//流水线节点，interface
+class PipeNode : public Thread
 {
 public:
+    PipeNode(const std::string& node_name) : Thread(node_name), pre_node_(this), level_(0) {}
+    virtual bool is_broadcast() {return false;} 
+    virtual void process() {}
+    virtual void show() = 0;
+
+    virtual void set_pre_node(PipeNode* node) {
+        pre_node_ = node;
+    }
+    virtual void set_level(int value) {level_ = value;}
+    virtual void inc_level() = 0;
+
+    PipeNode* pre_node() {
+        return pre_node_;
+    }
+
+    int level() {
+        return level_;
+    }
 
 protected:
-    std::list<PipeNode*> child_list_;
+    PipeNode* pre_node_;
+    int level_;
+
 };
 
-
-// class DemuxThread : public Thread
-// {
-// public:
-
-// protected:
-//     RingBuffer<std::shared_ptr<PipeData>>
-// };
-
-class PipeThread : public Thread
+//链条的一环，点对点
+class ChainNode : public PipeNode
 {
 public:
-    PipeThread(const std::string& thread_name, int queue_num = 4) 
-        : Thread(thread_name), fifo_(4), next_thread_(nullptr) {}
+    ChainNode(const std::string& node_name) : PipeNode(node_name), next_node_(nullptr) {}
 
-    void set_next_thread(PipeThread* thread) {
-        next_thread_ = thread;
-    }
- 
-    
-
-    PipeThread* next_thread() {
-        return next_thread_;
+    void append(PipeNode* node) {
+        next_node_ = node;
+        node->set_level(level()); 
+        node->set_pre_node(this);
     }
 
-    void push_data(std::shared_ptr<PipeData> ) {
-        fifo_.push();
+    virtual void inc_level() {
+        level_++;
+        if (next_node_) {
+            next_node_->set_level(level());
+        }
     }
 
-    SafeQueue<std::shared_ptr<PipeData> >& fifo() {
-        return fifo_;
+    void show() { 
+        std::stringstream ss;
+        for (int i = 0; i < level(); i++) {
+            ss << "\t";
+        }
+        std::cout << ss.str();
+        std::cout << "|── " << name() << ", pre=" << pre_node()->name() << std::endl; 
+        if (next_node_) {
+            next_node_->show();
+        } else {
+            std::cout << ss.str();
+            std::cout << "------------------------------" << std::endl;
+        }
     }
+
 
 protected: 
-    PipeThread* next_thread_; 
-    SafeQueue<std::shared_ptr<PipeData> > fifo_;
-
+    PipeNode* next_node_;
 };
 
-
-class FilterThread : public PipeThread
+//广播，1对多
+class BroadcastNode : public PipeNode
 {
 public:
-    FilterThread(const std::string& thread_name, int queue_num = 4) : PipeThread(thread_name, queue_num) {
+    BroadcastNode(const std::string& node_name) : PipeNode(node_name) {}
 
+    virtual bool is_broadcast() {return true;}
+
+    void add_next_node(PipeNode* node) {
+        node->set_pre_node(this);
+        node->set_level(level()); 
+        node->inc_level();
+        next_node_list_.push_back(node); 
     }
 
-    void process() {
-
-        while(true)
-        {
-            std::shared_ptr<PipeData> pipe_data = fifo().pop();
-            PipeStamp pipe_stamp(thread_name(), pipe_data->pipe_data_id());
-            pipe_stamp.record_now(); 
-            LOG(INFO) << thread_name() << " thread process: " << pipe_data->pipe_data_id() << " data, is_quit: " << (pipe_data->quit() ? "true" : "false");
-            if (!pipe_data->quit()) {
-                compute(pipe_data); 
-            }
-            
-            pipe_stamp.record_now();
-            pipe_data->push_stamp(pipe_stamp);
-            if (next_thread()) {
-                next_thread()->fifo().push(pipe_data);
-            }
-
-            if (pipe_data->quit()) {
-                break;
-            } 
+    virtual void inc_level() {
+        level_++;
+        for (const auto node : next_node_list_) {
+            node->inc_level();
         }
-
     }
 
-    virtual void compute(std::shared_ptr<PipeData> pipe_data) = 0;
+    void show() {  
+        std::stringstream ss;
+        for (int i = 0; i < level(); i++) {
+            ss << "\t";
+        }
+        std::cout << ss.str();
+        std::cout << "#── " << name() << ", pre=" << pre_node()->name() << std::endl;  
+        if (!next_node_list_.empty()) {
+            for (const auto node : next_node_list_) { 
+                node->show();
+            }
+        } else {
+            std::cout << ss.str();
+            std::cout << "------------------------------" << std::endl;
+        }
+        
+    }
+
+protected:
+    std::list<PipeNode*> next_node_list_;
 };
 
 
-
+class PipeManager
+{
+public:
+    PipeManager(PipeNode* root) : root_(root) {}
+protected:
+    PipeNode* root_;
+};
 
 
 }//namespace thread

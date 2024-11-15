@@ -5,8 +5,7 @@
 #include <condition_variable>
 #include <thread>
 #include <chrono>
-
-#include "thread/task.h"
+#include <glog/logging.h>
 
 namespace duck {
 namespace thread {
@@ -17,6 +16,8 @@ namespace thread {
 class Thread
 {
 public:
+    Thread(const std::string& thread_name) : thread_name_(thread_name) {}
+
     virtual void process() = 0;
 
     void start() {
@@ -30,6 +31,10 @@ public:
         }
     }
 
+    std::string name() {
+        return thread_name_;
+    }
+
 protected:
     static void thread_handle(Thread* thread) {
         LOG(INFO) << "thread is running!";
@@ -38,6 +43,7 @@ protected:
     }
 
 protected:
+    std::string thread_name_;
     std::thread thread_;
 };
 
