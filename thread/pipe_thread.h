@@ -106,8 +106,12 @@ class PipeNode : public Thread
 {
 public:
     PipeNode(const std::string& node_name) : Thread(node_name), pre_node_(this), level_(0) {}
-    virtual bool is_broadcast() {return false;} 
-    virtual void process() {}
+    virtual bool is_broadcast() {return false;}  
+    virtual bool is_slave() {return false;}
+    virtual void put(std::shared_ptr<PipeData> pipe_data) = 0;
+    virtual std::shared_ptr<PipeData> get() = 0;
+    virtual std::std::shared_ptr<PipeData> get_async() {return get();}
+
     virtual void show() = 0;
 
     virtual void set_pre_node(PipeNode* node) {
@@ -173,9 +177,48 @@ protected:
 class BroadcastNode : public PipeNode
 {
 public:
-    BroadcastNode(const std::string& node_name) : PipeNode(node_name) {}
+    BroadcastNode(const std::string& node_name, int buff_num = 4) : PipeNode(node_name), buff_(buff_num) {}
 
     virtual bool is_broadcast() {return true;}
+
+    virtual void process() {
+
+        while(true)
+        {
+            PipeStamp pipe_stamp(thread_name(), pipe_data->pipe_data_id());
+            pipe_stamp.record_now();
+
+            std::shared_ptr<PipeData> pipe_data = get();
+
+            pipe_stamp.record_now();
+            pipe_data->push_stamp(pipe_stamp);
+
+            for (const auto node : next_node_list_) {
+                if (!node->is_slave()) {
+                    node->put(pipe_data);
+                } 
+            }
+
+            if (pipe_data->quit()) {
+                break;
+            }
+
+
+        }
+
+    }
+
+    virtual void put(std::shared_ptr<PipeData> pipe_data) {
+        buff_.put(pipe_data);
+    }
+
+    virtual std::shared_ptr<PipeData> get() {
+        return buff_.get_sync();
+    }
+
+    virtual std::shared_ptr<PipeData> get_async() {
+        return buff_.get_async();
+    }
 
     void add_next_node(PipeNode* node) {
         node->set_pre_node(this);
@@ -211,7 +254,178 @@ public:
 
 protected:
     std::list<PipeNode*> next_node_list_;
+    RingBuffer<std::shared_ptr<PipeData> > buff_;
 };
+
+//产生PipeData，并传递给下一个节点
+class MasterRateNode : public ChainNode
+{
+public:
+    MasterRateNode(const std::string& node_name, float fps = -1) 
+        : ChainNode(node_name), fps_(fps), frame_count_(0), quit_(false) {
+            
+            period_us_ = (fps > 0) ? 1000000.0 / fps : 1.0;
+        }
+
+    virtual void process() {
+
+        timestamp_ = std::chrono::high_resolution_clock::now(); 
+        while(true)
+        {
+            auto t0 = std::chrono::high_resolution_clock::now();
+
+            PipeStamp pipe_stamp(thread_name(), pipe_data->pipe_data_id());
+            pipe_stamp.record_now(); 
+
+            std::shared_ptr<PipeData> pipe_data = std::make_shared<PipeData>(frame_count_, quit_); 
+
+            pipe_stamp.record_now();
+            pipe_data->push_stamp(pipe_stamp);
+
+            if (next_node()) {
+                next_node()->put(pipe_data);
+            }
+            
+            if (pipe_data->quit()) {
+                break;
+            }
+
+            frame_count_++;
+            auto t1 = std::chrono::high_resolution_clock::now();
+            auto duration = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0);
+            float diff_us = period_us_ - duration.count();
+            if ((fps_ > 0) && ( diff_us > 0)) {
+                std::chrono::microseconds us(diff_us);
+                std::this_thread::sleep_for(us);
+            }
+
+        }
+
+    }
+
+    virtual void put(std::shared_ptr<PipeData> pipe_data) {
+        LOG(FATAL) << "MasterRateNode have no put method!";
+    }
+
+    virtual std::shared_ptr<PipeData> get() {
+        LOG(FATAL) << "MasterRateNode have no get method!";
+    }
+
+protected:
+    float fps_;
+    float period_us_;
+    size_t frame_count_;
+    bool quit_; 
+};
+
+//从自己的fifo中取出一个PipeData，处理后，交给下一个节点。
+class FilterNode : public ChainNode
+{
+public:
+    FilterNode(const std::string& node_name, int queue_num) : ChainNode(node_name), fifo_(queue_num) {}
+
+    virtual void process() {
+        while(true)
+        {
+            std::shared_ptr<PipeData> pipe_data = get();
+
+            PipeStamp pipe_stamp(thread_name(), pipe_data->pipe_data_id());
+            pipe_stamp.record_now(); 
+
+            LOG(INFO) << thread_name() << " thread process: " << pipe_data->pipe_data_id() << " data, is_quit: " << (pipe_data->quit() ? "true" : "false");
+            
+            if (!pipe_data->quit()) {
+                compute(pipe_data); 
+            }
+            
+            pipe_stamp.record_now();
+            pipe_data->push_stamp(pipe_stamp);
+            if (next_node()) {
+                next_node()->put(pipe_data);
+            }
+
+            if (pipe_data->quit()) {
+                break;
+            } 
+        }
+    }
+
+    virtual void compute(std::shared_ptr<PipeData> pipe_data) = 0;
+
+    virtual void put(std::shared_ptr<PipeData> pipe_data) {
+        fifo_.push(pipe_data);
+    }
+
+    std::shared_ptr<PipeData> get() {
+        return fifo_.get();
+    }
+
+protected:
+    SafeQueue<std::shared_ptr<PipeData> > fifo_;
+};
+
+
+//从节点，异步的从上个节点获取PipeData，交给下一个节点。
+class SlaveRateNode : public ChainNode
+{
+public:
+    SlaveRateNode(const std::string& node_name, float fps) 
+        : ChainNode(node_name), fps_(fps) {
+            
+        period_us_ = (fps > 0) ? 1000000.0 / fps : 1.0;
+    }
+
+    virtual bool is_slave() {return true;}
+
+    virtual void process() {
+
+        while(true) { 
+            auto t0 = std::chrono::high_resolution_clock::now();
+
+            PipeStamp pipe_stamp(thread_name(), pipe_data->pipe_data_id());
+            pipe_stamp.record_now(); 
+
+            std::shared_ptr<PipeData> pipe_data = pre_node()->get_async();
+
+            pipe_stamp.record_now();
+            pipe_data->push_stamp(pipe_stamp);
+
+            if (next_node()) {
+                next_node()->put(pipe_data);
+            }
+
+            if (pipe_data->quit()) {
+                break;
+            }
+    
+            auto t1 = std::chrono::high_resolution_clock::now();
+            auto duration = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0);
+            float diff_us = period_us_ - duration.count();
+            if ((fps_ > 0) && ( diff_us > 0)) {
+                std::chrono::microseconds us(diff_us);
+                std::this_thread::sleep_for(us);
+            }
+            
+        }
+    }
+
+    virtual void put(std::shared_ptr<PipeData> pipe_data) {
+        LOG(FATAL) << "MasterRateNode have no put method!";
+    }
+
+    virtual std::shared_ptr<PipeData> get() {
+        LOG(FATAL) << "MasterRateNode have no get method!";
+    }
+
+
+
+protected:
+    float fps_;
+    float period_us_;
+};
+
+
+
 
 
 class PipeManager
