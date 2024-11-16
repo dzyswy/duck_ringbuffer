@@ -19,7 +19,7 @@ namespace thread {
 class PipeStamp
 {
 public:
-    PipeStamp(const std::string& thread_name, size_t pipe_data_id) : thread_name_(thread_name), pipe_data_id_(pipe_data_id) {}
+    PipeStamp(const std::string& name, size_t pipe_data_id) : thread_name_(name), pipe_data_id_(pipe_data_id) {}
 
     void record_now() {
         auto now = std::chrono::high_resolution_clock::now(); 
@@ -50,7 +50,7 @@ public:
         return (end - start);
     }
 
-    std::string thread_name() {
+    std::string name() {
         return thread_name_;
     }
 
@@ -108,9 +108,10 @@ public:
     PipeNode(const std::string& node_name) : Thread(node_name), pre_node_(this), level_(0) {}
     virtual bool is_broadcast() {return false;}  
     virtual bool is_slave() {return false;}
+    virtual void append(PipeNode* node) = 0;
     virtual void put(std::shared_ptr<PipeData> pipe_data) = 0;
     virtual std::shared_ptr<PipeData> get() = 0;
-    virtual std::std::shared_ptr<PipeData> get_async() {return get();}
+    virtual std::shared_ptr<PipeData> get_async() {return get();}
 
     virtual void show() = 0;
 
@@ -140,7 +141,7 @@ class ChainNode : public PipeNode
 public:
     ChainNode(const std::string& node_name) : PipeNode(node_name), next_node_(nullptr) {}
 
-    void append(PipeNode* node) {
+    virtual void append(PipeNode* node) {
         next_node_ = node;
         node->set_level(level()); 
         node->set_pre_node(this);
@@ -168,6 +169,10 @@ public:
         }
     }
 
+    PipeNode* next_node() {
+        return next_node_;
+    }
+
 
 protected: 
     PipeNode* next_node_;
@@ -185,10 +190,12 @@ public:
 
         while(true)
         {
-            PipeStamp pipe_stamp(thread_name(), pipe_data->pipe_data_id());
+            
+            std::shared_ptr<PipeData> pipe_data = get();
+
+            PipeStamp pipe_stamp(name(), pipe_data->pipe_data_id());
             pipe_stamp.record_now();
 
-            std::shared_ptr<PipeData> pipe_data = get();
 
             pipe_stamp.record_now();
             pipe_data->push_stamp(pipe_stamp);
@@ -220,7 +227,7 @@ public:
         return buff_.get_async();
     }
 
-    void add_next_node(PipeNode* node) {
+    virtual void append(PipeNode* node) {
         node->set_pre_node(this);
         node->set_level(level()); 
         node->inc_level();
@@ -269,15 +276,16 @@ public:
 
     virtual void process() {
 
-        timestamp_ = std::chrono::high_resolution_clock::now(); 
+   
         while(true)
         {
             auto t0 = std::chrono::high_resolution_clock::now();
 
-            PipeStamp pipe_stamp(thread_name(), pipe_data->pipe_data_id());
-            pipe_stamp.record_now(); 
 
             std::shared_ptr<PipeData> pipe_data = std::make_shared<PipeData>(frame_count_, quit_); 
+
+            PipeStamp pipe_stamp(name(), pipe_data->pipe_data_id());
+            pipe_stamp.record_now(); 
 
             pipe_stamp.record_now();
             pipe_data->push_stamp(pipe_stamp);
@@ -295,8 +303,8 @@ public:
             auto duration = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0);
             float diff_us = period_us_ - duration.count();
             if ((fps_ > 0) && ( diff_us > 0)) {
-                std::chrono::microseconds us(diff_us);
-                std::this_thread::sleep_for(us);
+                // std::chrono::microseconds us(diff_us);
+                // std::this_thread::sleep_for(us);
             }
 
         }
@@ -329,10 +337,10 @@ public:
         {
             std::shared_ptr<PipeData> pipe_data = get();
 
-            PipeStamp pipe_stamp(thread_name(), pipe_data->pipe_data_id());
+            PipeStamp pipe_stamp(name(), pipe_data->pipe_data_id());
             pipe_stamp.record_now(); 
 
-            LOG(INFO) << thread_name() << " thread process: " << pipe_data->pipe_data_id() << " data, is_quit: " << (pipe_data->quit() ? "true" : "false");
+            LOG(INFO) << name() << " thread process: " << pipe_data->pipe_data_id() << " data, is_quit: " << (pipe_data->quit() ? "true" : "false");
             
             if (!pipe_data->quit()) {
                 compute(pipe_data); 
@@ -357,7 +365,7 @@ public:
     }
 
     std::shared_ptr<PipeData> get() {
-        return fifo_.get();
+        return fifo_.pop();
     }
 
 protected:
@@ -382,10 +390,10 @@ public:
         while(true) { 
             auto t0 = std::chrono::high_resolution_clock::now();
 
-            PipeStamp pipe_stamp(thread_name(), pipe_data->pipe_data_id());
-            pipe_stamp.record_now(); 
-
             std::shared_ptr<PipeData> pipe_data = pre_node()->get_async();
+
+            PipeStamp pipe_stamp(name(), pipe_data->pipe_data_id());
+            pipe_stamp.record_now(); 
 
             pipe_stamp.record_now();
             pipe_data->push_stamp(pipe_stamp);
@@ -402,8 +410,8 @@ public:
             auto duration = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0);
             float diff_us = period_us_ - duration.count();
             if ((fps_ > 0) && ( diff_us > 0)) {
-                std::chrono::microseconds us(diff_us);
-                std::this_thread::sleep_for(us);
+                // std::chrono::microseconds us(diff_us);
+                // std::this_thread::sleep_for(us);
             }
             
         }
