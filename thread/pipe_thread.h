@@ -2,6 +2,7 @@
 
 #include <string>
 #include <iostream>
+#include <iomanip>
 #include <sstream>
 #include <fstream>
 #include <mutex>
@@ -21,33 +22,41 @@ class PipeStamp
 public:
     PipeStamp(const std::string& name, size_t pipe_data_id) : thread_name_(name), pipe_data_id_(pipe_data_id) {}
 
-    void record_now() {
-        auto now = std::chrono::high_resolution_clock::now(); 
-        time_vec_.push_back(now);
+    void record_now() { 
+
+        // 获取当前时间点
+        auto now = std::chrono::high_resolution_clock::now();
+
+        // 将时间点转换为微秒
+        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch());
+
+        // 获取微秒值
+        long long us = duration.count();
+
+        us_vec_.push_back(us & 0xffffffff);
     }
 
 
-    double time_ms(size_t id) {
-        CHECK(id < time_vec_.size()) << "PipeStamp don't record this id time!";
-        auto now = time_vec_[id].time_since_epoch();
-        auto time = std::chrono::duration_cast<std::chrono::microseconds>(now);
-        double ms = (double)time.count() / 1000.0;
+    float time_ms(size_t id) {
+        CHECK(id < us_vec_.size()) << "PipeStamp don't record this id time!";
+        long us = us_vec_[id]; 
+        float ms = (float)us / 1000.0;
         return ms;
     }
 
-    double start_ms() {
+    float start_ms() {
         return time_ms(0);
     }
     
-    double end_ms() {
+    float end_ms() {
         return time_ms(1);
     }
 
-    double duration_ms(size_t start_id = 0, size_t end_id = 1) {
+    float duration_ms(size_t start_id = 0, size_t end_id = 1) {
  
-        double start = time_ms(start_id);
-        double end = time_ms(end_id);
-        return (end - start);
+        float start = time_ms(start_id);
+        float end = time_ms(end_id);
+        return (end > start) ? (end - start) : (start - end);
     }
 
     std::string name() {
@@ -60,13 +69,13 @@ public:
 
 protected:
     std::string thread_name_;
-    size_t pipe_data_id_;
-    std::vector<std::chrono::time_point<std::chrono::high_resolution_clock>> time_vec_;
+    size_t pipe_data_id_; 
+    std::vector<long> us_vec_;
 };
 
 class PipeData
 {
-public:
+public: 
     PipeData(size_t pipe_data_id = 0, bool quit = false) :  pipe_data_id_(pipe_data_id), quit_(quit) {}
 
     size_t pipe_data_id() {
@@ -85,14 +94,22 @@ public:
         return quit_;
     }
 
-    double latency_ms() {
+    float latency_ms() {
         if (pipe_stamp_vec_.empty()) {
             return 0;
         }
 
-        double start = pipe_stamp_vec_.front().start_ms();
-        double end = pipe_stamp_vec_.back().end_ms();
+        float start = pipe_stamp_vec_.front().start_ms();
+        float end = pipe_stamp_vec_.back().end_ms();
         return (end - start);
+    }
+
+    void show() {
+        for (size_t i = 0; i < pipe_stamp_vec_.size(); i++) {
+            PipeStamp& stamp = pipe_stamp_vec_[i];
+            LOG(INFO)<< std::fixed << std::setprecision(3) << i << "\t thread: " << stamp.name() << "\t id: " << stamp.pipe_data_id() 
+                << "\t start: " << stamp.start_ms() << "\t end: " << stamp.end_ms() << "\t duration: " << stamp.duration_ms();
+        }
     }
 
 protected:
@@ -111,9 +128,9 @@ public:
     virtual bool is_broadcast() {return false;}  
     virtual bool is_slave() {return false;}
     virtual PipeNode* append(PipeNode* node) = 0;
-    virtual void put(std::shared_ptr<PipeData> pipe_data) = 0;
-    virtual std::shared_ptr<PipeData> get() = 0;
-    virtual std::shared_ptr<PipeData> get_async() {return get();}
+    virtual void put(PipeData pipe_data) = 0;
+    virtual PipeData get() = 0;
+    virtual PipeData get_async() {return get();}
 
     virtual void show() = 0;
     virtual void collect(std::vector<PipeNode*>& node_vec) = 0;
@@ -197,7 +214,7 @@ protected:
 class BroadcastNode : public PipeNode
 {
 public:
-    BroadcastNode(const std::string& node_name, int buff_num = 4) : PipeNode(node_name), buff_(buff_num) {}
+    BroadcastNode(const std::string& node_name, int buff_num = 4) : PipeNode(node_name), buff_(buff_num, node_name) {}
 
     virtual bool is_broadcast() {return true;}
 
@@ -206,15 +223,13 @@ public:
         while(true)
         {
             
-            std::shared_ptr<PipeData> pipe_data = get();
+            PipeData pipe_data = get();
 
-            PipeStamp pipe_stamp(name(), pipe_data->pipe_data_id());
+            PipeStamp pipe_stamp(name(), pipe_data.pipe_data_id());
             pipe_stamp.record_now();
  
-
-
             pipe_stamp.record_now();
-            pipe_data->push_stamp(pipe_stamp);
+            pipe_data.push_stamp(pipe_stamp);
 
             for (const auto node : next_node_list_) {
                 if (!node->is_slave()) {
@@ -222,7 +237,7 @@ public:
                 } 
             }
 
-            if (pipe_data->quit()) {
+            if (pipe_data.quit()) {
                 break;
             }
 
@@ -231,15 +246,15 @@ public:
         running_ = false;
     }
 
-    virtual void put(std::shared_ptr<PipeData> pipe_data) {
+    virtual void put(PipeData pipe_data) {
         buff_.put(pipe_data);
     }
 
-    virtual std::shared_ptr<PipeData> get() {
+    virtual PipeData get() {
         return buff_.get_sync();
     }
 
-    virtual std::shared_ptr<PipeData> get_async() {
+    virtual PipeData get_async() {
         return buff_.get_async();
     }
 
@@ -287,7 +302,7 @@ public:
 
 protected:
     std::list<PipeNode*> next_node_list_;
-    RingBuffer<std::shared_ptr<PipeData> > buff_;
+    RingBuffer<PipeData > buff_;
 };
 
 
@@ -296,50 +311,50 @@ protected:
 class FilterNode : public ChainNode
 {
 public:
-    FilterNode(const std::string& node_name, int queue_num) : ChainNode(node_name), fifo_(queue_num) {}
+    FilterNode(const std::string& node_name, int queue_num) : ChainNode(node_name), fifo_(queue_num, node_name) {}
 
     virtual void process() {
 
         running_ = true;
         while(true)
         {
-            std::shared_ptr<PipeData> pipe_data = get();
+            PipeData pipe_data = get();
 
-            PipeStamp pipe_stamp(name(), pipe_data->pipe_data_id());
+            PipeStamp pipe_stamp(name(), pipe_data.pipe_data_id());
             pipe_stamp.record_now(); 
  
 
-            LOG(INFO) << name() << " thread process: " << pipe_data->pipe_data_id() << " data, is_quit: " << (pipe_data->quit() ? "true" : "false");
+            LOG(INFO) << name() << " thread process: " << pipe_data.pipe_data_id() << " data, is_quit: " << (pipe_data.quit() ? "true" : "false");
             
-            if (!pipe_data->quit()) {
+            if (!pipe_data.quit()) {
                 compute(pipe_data); 
             }
             
             pipe_stamp.record_now();
-            pipe_data->push_stamp(pipe_stamp);
+            pipe_data.push_stamp(pipe_stamp);
             if (next_node()) {
                 next_node()->put(pipe_data);
             }
 
-            if (pipe_data->quit()) {
+            if (pipe_data.quit()) {
                 break;
             } 
         }
         running_ = false;
     }
 
-    virtual void compute(std::shared_ptr<PipeData> pipe_data) = 0;
+    virtual void compute(PipeData pipe_data) = 0;
 
-    virtual void put(std::shared_ptr<PipeData> pipe_data) {
+    virtual void put(PipeData pipe_data) {
         fifo_.push(pipe_data);
     }
 
-    std::shared_ptr<PipeData> get() {
+    PipeData get() {
         return fifo_.pop();
     }
 
 protected:
-    SafeQueue<std::shared_ptr<PipeData> > fifo_;
+    SafeQueue<PipeData > fifo_;
 };
 
 
@@ -361,26 +376,26 @@ public:
         while(true) { 
             auto t0 = std::chrono::high_resolution_clock::now();
 
-            std::shared_ptr<PipeData> pipe_data = pre_node()->get_async();
+            PipeData pipe_data = pre_node()->get_async();
 
-            PipeStamp pipe_stamp(name(), pipe_data->pipe_data_id());
+            PipeStamp pipe_stamp(name(), pipe_data.pipe_data_id());
             pipe_stamp.record_now(); 
  
 
             pipe_stamp.record_now();
-            pipe_data->push_stamp(pipe_stamp);
+            pipe_data.push_stamp(pipe_stamp);
 
             if (next_node()) {
                 next_node()->put(pipe_data);
             }
 
-            if (pipe_data->quit()) {
+            if (pipe_data.quit()) {
                 break;
             }
     
             auto t1 = std::chrono::high_resolution_clock::now();
             auto duration = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0);
-            long diff_us = period_us_ - duration.count();
+            long long diff_us = period_us_ - duration.count();
             if ((fps_ > 0) && ( diff_us > 0)) {
                 std::chrono::microseconds us(diff_us);
                 std::this_thread::sleep_for(us);
@@ -390,11 +405,11 @@ public:
         running_ = false;
     }
 
-    virtual void put(std::shared_ptr<PipeData> pipe_data) {
+    virtual void put(PipeData pipe_data) {
         LOG(FATAL) << "RootNode have no put method!";
     }
 
-    virtual std::shared_ptr<PipeData> get() {
+    virtual PipeData get() {
         LOG(FATAL) << "RootNode have no get method!";
     }
 
@@ -428,20 +443,13 @@ public:
         running_ = true;
         while(true)
         { 
-            std::shared_ptr<PipeData> pipe_data = std::make_shared<PipeData>(frame_count_, quit_); 
-
-            PipeStamp pipe_stamp(name(), pipe_data->pipe_data_id());
-            pipe_stamp.record_now(); 
- 
-
-            pipe_stamp.record_now();
-            pipe_data->push_stamp(pipe_stamp);
+            PipeData pipe_data(frame_count_, quit_); 
 
             if (next_node()) {
                 next_node()->put(pipe_data);
             }
             
-            if (pipe_data->quit()) {
+            if (pipe_data.quit()) {
                 break;
             }
 
@@ -469,11 +477,11 @@ public:
         } 
     }
 
-    virtual void put(std::shared_ptr<PipeData> pipe_data) {
+    virtual void put(PipeData pipe_data) {
         LOG(FATAL) << "RootNode have no put method!";
     }
 
-    virtual std::shared_ptr<PipeData> get() {
+    virtual PipeData get() {
         LOG(FATAL) << "RootNode have no get method!";
     }
 

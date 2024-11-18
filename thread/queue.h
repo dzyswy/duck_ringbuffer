@@ -17,8 +17,7 @@ template<typename T>
 class SafeQueue
 {
 public:
-    SafeQueue() : deep_(-1) {}
-    SafeQueue(int deep) : deep_(deep) {
+    SafeQueue(int deep = -1, const std::string& queue_name = std::string()) : deep_(deep), queue_name_(queue_name) {
 
     }
  
@@ -28,7 +27,7 @@ public:
         std::unique_lock<std::mutex> lock(mutex_);
 
         while(((deep_ > 0) && (list_.size() >= deep_))) {
-            LOG(INFO) << "queue is full, wait an available position...";
+            LOG(INFO) << name() << " queue is full, wait an available position...";
             full_cond_.wait(lock);
         }
         list_.push_back(data);
@@ -41,7 +40,7 @@ public:
         std::unique_lock<std::mutex> lock(mutex_);
 
         while(list_.empty()) {
-            LOG(INFO) << "queue is empty, wait an available data...";
+            LOG(INFO) << name() << " queue is empty, wait an available data...";
             empty_cond_.wait(lock);
         }
         T data = list_.front();
@@ -72,9 +71,14 @@ public:
         return deep_;
     }
 
+    std::string name() {
+        return queue_name_;
+    }
+
 
 protected:
     int deep_;
+    std::string queue_name_;
     std::list<T > list_;
     std::mutex mutex_;
     std::condition_variable full_cond_;

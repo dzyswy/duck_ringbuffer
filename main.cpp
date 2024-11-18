@@ -24,6 +24,8 @@ int main(int argc, char* argv[])
     VoPreNode node_vo_pre("node_vo_pre");
     VoNode node_vo("node_vo");
 
+    BenchMarkNode node_bench_vo("node_bench_vo");
+
 
     VencNode node_venc("node_venc");
     BroadcastNode broad_venc("broad_venc", 4);
@@ -34,7 +36,7 @@ int main(int argc, char* argv[])
     SlaveRateNode node_rtsp_rate("node_rtsp_rate", 30.0);
     RtspNode node_rtsp("node_rtsp");
 
-    node_root.append(&node_cap)->append(&node_pre_proc)->append(&node_detect)->append(&broad_vi)->append(&node_vo_rate)->append(&node_vo_pre)->append(&node_vo);
+    node_root.append(&node_cap)->append(&node_pre_proc)->append(&node_detect)->append(&broad_vi)->append(&node_vo_rate)->append(&node_vo_pre)->append(&node_vo)->append(&node_bench_vo);
  
     broad_vi.append(&node_venc)->append(&broad_venc)->append(&node_record_rate)->append(&node_record);
 

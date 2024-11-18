@@ -17,7 +17,7 @@ template<typename T>
 class RingBuffer
 {
 public:
-    RingBuffer(size_t deep) : deep_(deep), wptr_(0) {}
+    RingBuffer(size_t deep, const std::string& buff_name = std::string()) : deep_(deep), wptr_(0), buff_name_(buff_name) {}
 
     void put(T value) {
         std::unique_lock<std::mutex> lock(mutex_);
@@ -37,7 +37,7 @@ public:
 
         while(buff_.empty())
         {
-            LOG(INFO) << "queue is empty, wait an available data...";
+            LOG(INFO) << name() << " queue is empty, wait an available data...";
             cond_.wait(lock);
         }
 
@@ -50,10 +50,15 @@ public:
         return buff_[(wptr_ - 1) % deep_];
     }
 
+    std::string name() {
+        return buff_name_;
+    }
+
 
 protected:
     size_t deep_;
     size_t wptr_;
+    std::string buff_name_;
     std::vector<T> buff_;
     std::condition_variable cond_;
     std::mutex mutex_;
