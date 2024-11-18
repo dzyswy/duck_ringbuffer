@@ -20,7 +20,7 @@ public:
 
     virtual void process() = 0;
 
-    void start() {
+    virtual void start() {
         thread_ = std::thread(Thread::thread_handle, this); 
         //thread_.detach();
     }
@@ -37,9 +37,9 @@ public:
 
 protected:
     static void thread_handle(Thread* thread) {
-        LOG(INFO) << "thread is running!";
+        LOG(INFO) << thread->name() << " thread is running!";
         thread->process();
-        LOG(INFO) << "thread is quit!";
+        LOG(INFO) << thread->name() << " thread is quit!";
     }
 
 protected:

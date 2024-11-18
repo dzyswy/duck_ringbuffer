@@ -14,7 +14,7 @@ int main(int argc, char* argv[])
     FLAGS_stderrthreshold = 0;
     FLAGS_minloglevel = 0;
 
-    MasterRateNode node_root("node_root", -1);
+    RootNode node_root("node_root");
     CaptureNode node_cap("node_cap");
     PreProcNode node_pre_proc("node_pre_proc");
     DetectNode node_detect("node_detect");
@@ -34,27 +34,18 @@ int main(int argc, char* argv[])
     SlaveRateNode node_rtsp_rate("node_rtsp_rate", 30.0);
     RtspNode node_rtsp("node_rtsp");
 
-    node_root.append(&node_cap);
-    node_cap.append(&node_pre_proc);
-    node_pre_proc.append(&node_detect);
-    node_detect.append(&broad_vi);
+    node_root.append(&node_cap)->append(&node_pre_proc)->append(&node_detect)->append(&broad_vi)->append(&node_vo_rate)->append(&node_vo_pre)->append(&node_vo);
+ 
+    broad_vi.append(&node_venc)->append(&broad_venc)->append(&node_record_rate)->append(&node_record);
 
-    broad_vi.append(&node_vo_rate);
-    node_vo_rate.append(&node_vo_pre);
-    node_vo_pre.append(&node_vo);
+    broad_venc.append(&node_rtsp_rate)->append(&node_rtsp);
 
-
-    broad_vi.append(&node_venc);
-    node_venc.append(&broad_venc);
-
-    broad_venc.append(&node_record_rate);
-    node_record_rate.append(&node_record);
-
-    broad_venc.append(&node_rtsp_rate);
-    node_rtsp_rate.append(&node_rtsp);
-
-    
+    node_root.init();
     node_root.show();
+
+    node_root.run();
+    std::this_thread::sleep_for(std::chrono::seconds(5)); 
+    node_root.stop();
 
     std::cout << "wait key..." << std::endl;
     std::getchar(); 
