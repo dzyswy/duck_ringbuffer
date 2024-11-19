@@ -118,7 +118,168 @@ protected:
     bool quit_;
 };
 
- 
+
+class PipeNode : public Thread
+{
+public:
+    PipeNode(const std::string& node_name, int buff_num) : Thread(node_name), buff_(buff_num), pre_node_(this) {
+
+    }
+
+    virtual PipeNode* append(PipeNode* node) {
+        node->set_pre_node(this);
+        node->set_level(level()); 
+        node->inc_level();
+        next_node_list_.push_back(node); 
+        return node;
+    }
+
+    void put_data(PipeData pipe_data) {
+        buff_.put(pipe_data);
+    }
+
+    PipeData get_data() {
+        return buff_.get_sync();
+    }
+
+    PipeData get_data_async() {
+        return buff_.get_async();
+    }
+
+    PipeNode* pre_node() {
+        return pre_node_;
+    }
+
+    long now_us() {
+        auto now = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch());
+        long us = duration.count() & 0xffffffff;
+        return us;
+    }
+
+protected:
+    PipeNode* pre_node_;
+    std::list<PipeNode*> next_node_list_;
+    RingBuffer<PipeData > buff_;
+    
+};
+
+class RootNode : public PipeNode
+{
+public:
+    RootNode(const std::string& node_name, int buff_num = 4) : PipeNode(node_name, buff_num) {}
+
+    virtual void process()
+    {
+        while(true)
+        { 
+            PipeData pipe_data(frame_count_, quit_); 
+            PipeStamp pipe_stamp(name(), pipe_data.pipe_data_id());
+            pipe_stamp.record_now();
+
+            compute(pipe_data);
+
+            pipe_stamp.record_now();
+            pipe_data.push_stamp(pipe_stamp);
+
+            put_data(pipe_data);
+            
+            if (pipe_data.quit()) {
+                break;
+            }
+
+            frame_count_++;
+        
+        }
+    }
+
+    virtual void compute(PipeData pipe_data) = 0;
+
+
+};
+
+class FilterNode : public PipeNode
+{
+public:
+    FilterNode(const std::string& node_name, long period_us = -1) : PipeNode(node_name), period_us_(period_us), frame_count_(0) {
+
+    }
+
+    virtual void process() {
+        if (period_us > 0) {
+            pull_process();
+        } else {
+            push_process();
+        }
+    }
+
+    void push_process() {
+
+        while(true)
+        {
+            PipeData pipe_data = pre_node()->get_data();
+   
+            PipeStamp pipe_stamp(name(), pipe_data.pipe_data_id());
+            pipe_stamp.record_now();
+
+            compute(pipe_data);
+
+            pipe_stamp.record_now();
+            pipe_data.push_stamp(pipe_stamp);
+
+            put_data(pipe_data);
+
+            if (pipe_data.quit()) {
+                break;
+            }
+
+        }
+    }
+
+    void pull_process() {
+
+        while(true)
+        {
+            long t0 = now_us();
+            PipeData pipe_data = pre_node()->get_data_async();
+
+            PipeStamp pipe_stamp(name(), pipe_data.pipe_data_id());
+            pipe_stamp.record_now();
+
+            compute(pipe_data);
+
+            pipe_stamp.record_now();
+            pipe_data.push_stamp(pipe_stamp);
+
+            put_data(pipe_data);
+
+            if (pipe_data.quit()) {
+                break;
+            }
+
+            long t1 = now_us();
+            long used_us = (t1 > t0) ? (t1 - t0) : (t0 - t1);
+            long diff_us = period_us_ - used_us;
+            if (diff_us > 0) {
+                std::chrono::microseconds us(diff_us);
+                std::this_thread::sleep_for(us);
+            }
+        }
+    }
+
+    virtual void compute(PipeData pipe_data) = 0;
+
+protected:
+    long period_us_;
+    size_t frame_count_;
+};
+
+
+
+
+
+
+#if 0
 
 //流水线节点，interface
 class PipeNode : public Thread
@@ -127,7 +288,15 @@ public:
     PipeNode(const std::string& node_name) : Thread(node_name), pre_node_(this), level_(0), running_(false) {}
     virtual bool is_broadcast() {return false;}  
     virtual bool is_slave() {return false;}
-    virtual PipeNode* append(PipeNode* node) = 0;
+
+    virtual PipeNode* append(PipeNode* node) {
+        node->set_pre_node(this);
+        node->set_level(level()); 
+        node->inc_level();
+        next_node_list_.push_back(node); 
+        return node;
+    }
+
     virtual void put(PipeData pipe_data) = 0;
     virtual PipeData get() = 0;
     virtual PipeData get_async() {return get();}
@@ -155,6 +324,7 @@ public:
  
 protected:
     PipeNode* pre_node_;
+    std::list<PipeNode*> next_node_list_;
     int level_; 
     bool running_;
 };
@@ -492,6 +662,7 @@ protected:
     std::vector<PipeNode*> node_vec_;
 };
 
+#endif
 
 }//namespace thread
 }//namespace duck

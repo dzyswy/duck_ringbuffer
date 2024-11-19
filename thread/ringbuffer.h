@@ -47,6 +47,7 @@ public:
     T get_sync() {
         std::unique_lock<std::mutex> lock(mutex_);
         cond_.wait(lock);
+
         return buff_[(wptr_ - 1) % deep_];
     }
 

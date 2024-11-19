@@ -16,7 +16,7 @@ namespace thread {
 class Thread
 {
 public:
-    Thread(const std::string& thread_name) : thread_name_(thread_name) {}
+    Thread(const std::string& thread_name) : thread_name_(thread_name), running_(false) {}
 
     virtual void process() = 0;
 
@@ -35,16 +35,23 @@ public:
         return thread_name_;
     }
 
+    bool is_running() {
+        return running_;
+    }
+
 protected:
     static void thread_handle(Thread* thread) {
         LOG(INFO) << thread->name() << " thread is running!";
+        running_ = true;
         thread->process();
         LOG(INFO) << thread->name() << " thread is quit!";
+        running_ = false;
     }
 
 protected:
     std::string thread_name_;
     std::thread thread_;
+    bool running_;
 };
 
 
