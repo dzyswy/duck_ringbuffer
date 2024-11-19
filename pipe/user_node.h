@@ -92,14 +92,26 @@ public:
 class BenchMarkNode : public FilterNode
 {
 public:
-    BenchMarkNode(const std::string& node_name, int queue_num = 4) : FilterNode(node_name, queue_num) {}
+    BenchMarkNode(const std::string& node_name, int queue_num = 4) : FilterNode(node_name, queue_num), frame_count_(0), pre_frame_count_(0) {}
 
     void compute(PipeData pipe_data) {
- 
+        frame_count_++;
         pipe_data.show();
         LOG(INFO) << "latency: " << pipe_data.latency_ms();
     }
 
+    int calc_fps() { 
+        fps_ = (frame_count_ > pre_frame_count_) ? (frame_count_ - pre_frame_count_) : (pre_frame_count_ - frame_count_);
+        pre_frame_count_ = frame_count_;
+        return fps_;
+    }
+
+
+
+protected:
+    int frame_count_;
+    int pre_frame_count_;
+    int fps_;
 };
 
 
