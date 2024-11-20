@@ -35,6 +35,10 @@ public:
         return thread_name_;
     }
 
+    void set_running(bool value) {
+        running_ = value;
+    }
+
     bool is_running() {
         return running_;
     }
@@ -42,10 +46,10 @@ public:
 protected:
     static void thread_handle(Thread* thread) {
         LOG(INFO) << thread->name() << " thread is running!";
-        running_ = true;
+        thread->set_running(true);
         thread->process();
         LOG(INFO) << thread->name() << " thread is quit!";
-        running_ = false;
+        thread->set_running(false);
     }
 
 protected:

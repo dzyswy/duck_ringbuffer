@@ -122,14 +122,13 @@ protected:
 class PipeNode : public Thread
 {
 public:
-    PipeNode(const std::string& node_name, int buff_num) : Thread(node_name), buff_(buff_num), pre_node_(this) {
+    PipeNode(const std::string& node_name, int buff_num) : Thread(node_name), buff_(buff_num), pre_node_(nullptr), level_(0) {
 
     }
 
     virtual PipeNode* append(PipeNode* node) {
-        node->set_pre_node(this);
-        node->set_level(level()); 
-        node->inc_level();
+        node->set_pre_node(this); 
+        node->inc_level(level());
         next_node_list_.push_back(node); 
         return node;
     }
@@ -146,8 +145,70 @@ public:
         return buff_.get_async();
     }
 
+    void set_pre_node(PipeNode* node) {
+        pre_node_ = node;
+    }
+
     PipeNode* pre_node() {
         return pre_node_;
+    }
+
+    virtual void start() {
+        for (const auto node : next_node_list_) {
+            node->start();
+        }
+
+        Thread::start();
+        while(!is_running());
+    }
+
+    virtual void stop() {
+        for (const auto node : next_node_list_) {
+            node->stop();
+        }
+        join();
+    }
+
+
+    bool is_child_quit() {
+        for (const auto node : next_node_list_) {
+            if (node->is_running()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    void show() {
+        std::stringstream ss;
+        for (int i = 0; i < level(); i++) {
+            ss << "\t";
+        }
+        ss << "├── " << name();
+        std::cout << ss.str() << std::endl;
+        for (const auto node : next_node_list_) { 
+            node->show();
+        }
+    }
+
+    void inc_level(int level) {
+        level_ = level + 1;
+        for (const auto node : next_node_list_) {
+            node->inc_level(level_);
+        }
+    }
+ 
+
+    int level() {
+        return level_;
+    }
+
+    bool is_root() {
+        return (pre_node_ == nullptr) ? true : false;
+    }
+
+    bool is_leaf() {
+        return next_node_list_.empty();
     }
 
     long now_us() {
@@ -161,13 +222,14 @@ protected:
     PipeNode* pre_node_;
     std::list<PipeNode*> next_node_list_;
     RingBuffer<PipeData > buff_;
-    
+    int level_;
 };
 
 class RootNode : public PipeNode
 {
 public:
-    RootNode(const std::string& node_name, int buff_num = 4) : PipeNode(node_name, buff_num) {}
+    RootNode(const std::string& node_name, int buff_num = 4) 
+        : PipeNode(node_name, buff_num), frame_count_(0), quit_(true) {}
 
     virtual void process()
     {
@@ -185,7 +247,9 @@ public:
             put_data(pipe_data);
             
             if (pipe_data.quit()) {
-                break;
+                if (is_child_quit()) {
+                    break;
+                }
             }
 
             frame_count_++;
@@ -195,18 +259,36 @@ public:
 
     virtual void compute(PipeData pipe_data) = 0;
 
+    virtual void start() {
+        quit_ = false;
+        for (const auto node : next_node_list_) {
+            node->start();
+        }
+        Thread::start();
+        while(!is_running());
+    }
 
+    virtual void stop() {
+        quit_ = true;
+        PipeNode::stop();
+    }
+
+    
+
+protected:
+    size_t frame_count_;
+    bool quit_;
 };
 
 class FilterNode : public PipeNode
 {
 public:
-    FilterNode(const std::string& node_name, long period_us = -1) : PipeNode(node_name), period_us_(period_us), frame_count_(0) {
+    FilterNode(const std::string& node_name, int buff_num = 4, long period_us = -1) : PipeNode(node_name, buff_num), period_us_(period_us), frame_count_(0) {
 
     }
 
     virtual void process() {
-        if (period_us > 0) {
+        if (period_us_ > 0) {
             pull_process();
         } else {
             push_process();
@@ -230,7 +312,14 @@ public:
             put_data(pipe_data);
 
             if (pipe_data.quit()) {
-                break;
+    
+                if (is_leaf()) {
+                    break;
+                } else {
+                    if (is_child_quit()) {
+                        break;
+                    }
+                }
             }
 
         }
@@ -254,7 +343,14 @@ public:
             put_data(pipe_data);
 
             if (pipe_data.quit()) {
-                break;
+    
+                if (is_leaf()) {
+                    break;
+                } else {
+                    if (is_child_quit()) {
+                        break;
+                    }
+                }
             }
 
             long t1 = now_us();

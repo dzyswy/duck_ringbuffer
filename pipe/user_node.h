@@ -7,20 +7,20 @@ using namespace duck::thread;
 namespace duck {
 namespace pipe {
 
-class CaptureNode : public FilterNode
+class CaptureNode : public RootNode
 {
 public:
-    CaptureNode(const std::string& node_name, int queue_num = 4) : FilterNode(node_name, queue_num) {}
+    CaptureNode(const std::string& node_name, int buff_num = 4) : RootNode(node_name, buff_num) {}
     void compute(PipeData pipe_data) {
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(19)); 
+        std::this_thread::sleep_for(std::chrono::milliseconds(20)); 
     }
 };
 
 class PreProcNode : public FilterNode
 {
 public:
-    PreProcNode(const std::string& node_name, int queue_num = 4) : FilterNode(node_name, queue_num) {}
+    PreProcNode(const std::string& node_name, int buff_num = 4, long period_us = -1) : FilterNode(node_name, buff_num, period_us) {}
     void compute(PipeData pipe_data) {
 
         std::this_thread::sleep_for(std::chrono::milliseconds(19)); 
@@ -30,7 +30,7 @@ public:
 class DetectNode : public FilterNode
 {
 public:
-    DetectNode(const std::string& node_name, int queue_num = 4) : FilterNode(node_name, queue_num) {}
+    DetectNode(const std::string& node_name, int buff_num = 4, long period_us = -1) : FilterNode(node_name, buff_num, period_us) {}
     void compute(PipeData pipe_data) {
 
         std::this_thread::sleep_for(std::chrono::milliseconds(19)); 
@@ -41,7 +41,7 @@ public:
 class VoPreNode : public FilterNode
 {
 public:
-    VoPreNode(const std::string& node_name, int queue_num = 4) : FilterNode(node_name, queue_num) {}
+    VoPreNode(const std::string& node_name, int buff_num = 4, long period_us = -1) : FilterNode(node_name, buff_num, period_us) {}
     void compute(PipeData pipe_data) {
 
         std::this_thread::sleep_for(std::chrono::milliseconds(19)); 
@@ -52,7 +52,7 @@ public:
 class VoNode : public FilterNode
 {
 public:
-    VoNode(const std::string& node_name, int queue_num = 4) : FilterNode(node_name, queue_num) {}
+    VoNode(const std::string& node_name, int buff_num = 4, long period_us = -1) : FilterNode(node_name, buff_num, period_us) {}
     void compute(PipeData pipe_data) {
 
         std::this_thread::sleep_for(std::chrono::milliseconds(19)); 
@@ -62,7 +62,7 @@ public:
 class VencNode : public FilterNode
 {
 public:
-    VencNode(const std::string& node_name, int queue_num = 4) : FilterNode(node_name, queue_num) {}
+    VencNode(const std::string& node_name, int buff_num = 4, long period_us = -1) : FilterNode(node_name, buff_num, period_us) {}
     void compute(PipeData pipe_data) {
 
         std::this_thread::sleep_for(std::chrono::milliseconds(25)); 
@@ -72,7 +72,7 @@ public:
 class RecordNode : public FilterNode
 {
 public:
-    RecordNode(const std::string& node_name, int queue_num = 4) : FilterNode(node_name, queue_num) {}
+    RecordNode(const std::string& node_name, int buff_num = 4, long period_us = -1) : FilterNode(node_name, buff_num, period_us) {}
     void compute(PipeData pipe_data) {
 
         std::this_thread::sleep_for(std::chrono::milliseconds(25)); 
@@ -82,7 +82,7 @@ public:
 class RtspNode : public FilterNode
 {
 public:
-    RtspNode(const std::string& node_name, int queue_num = 4) : FilterNode(node_name, queue_num) {}
+    RtspNode(const std::string& node_name, int buff_num = 4, long period_us = -1) : FilterNode(node_name, buff_num, period_us) {}
     void compute(PipeData pipe_data) {
 
         std::this_thread::sleep_for(std::chrono::milliseconds(25)); 
@@ -92,7 +92,7 @@ public:
 class BenchMarkNode : public FilterNode
 {
 public:
-    BenchMarkNode(const std::string& node_name, int queue_num = 4) : FilterNode(node_name, queue_num), frame_count_(0), pre_frame_count_(0) {}
+    BenchMarkNode(const std::string& node_name, int buff_num = 4) : FilterNode(node_name, buff_num), frame_count_(0), pre_frame_count_(0) {}
 
     void compute(PipeData pipe_data) {
         frame_count_++;
